@@ -1,0 +1,30 @@
+{
+  "name": "splunk_sqs",
+  "version": "1.0.0",
+  "description": "AWS sqs collector for Splunk",
+  "main": "splunk_sqs.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/httpstergeek/splunk-sqs.git"
+  },
+  "keywords": [
+    "splunk",
+    "sqs",
+    "modular",
+    "input",
+    "node"
+  ],
+  "author": "bmacias",
+  "license": "Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/httpstergeek/splunk-sqs/issues"
+  },
+  "homepage": "https://github.com/httpstergeek/splunk-sqs#readme",
+  "dependencies": {
+    "aws-sdk": "^2.2.17",
+    "splunk-sdk": "^1.8.0"
+  }
+}
