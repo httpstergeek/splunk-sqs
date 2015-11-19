@@ -13,41 +13,17 @@
 // License for the specific language governing permissions and limitations
 // under the License.
 (function() {
-  var fs  = require('fs');
-  var path = require('path');
   var splunkjs = require("splunk-sdk");
   var aws = require('aws-sdk');
-  var Async = splunkjs.Async;
   var ModularInputs = splunkjs.ModularInputs;
   var Logger = ModularInputs.Logger;
   var Event = ModularInputs.Event;
   var Scheme = ModularInputs.Scheme;
   var Argument = ModularInputs.Argument;
-  var utils = ModularInputs.utils;
 
-  var SDK_UA_STRING = "splunk-sdk-javascript/1.8.0";
-
-  // Create easy to read date format.
-  function getDisplayDate(date) {
-    var monthStrings = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-    date = new Date(date);
-
-    var hours = date.getHours();
-    if (hours < 10) {
-      hours = "0" + hours.toString();
-    }
-    var mins = date.getMinutes();
-    if (mins < 10) {
-      mins = "0" + mins.toString();
-    }
-
-    return monthStrings[date.getMonth()] + " " + date.getDate() + ", " + date.getFullYear() +
-      " - " + hours + ":" + mins + " " + (date.getUTCHours() < 12 ? "AM" : "PM");
-  }
 
   exports.getScheme = function() {
-    var scheme = new Scheme("AWS SQS");
+    var scheme = new Scheme("sqs poller");
 
     scheme.description = "Pulls events for an AWS SQS queue";
     scheme.useExternalValidation = false;
@@ -92,7 +68,7 @@
       new Argument({
         name: "WaitTimeSeconds",
         dataType: Argument.dataTypeNumber,
-        description: "how long should we wait for a message in seconds. Default 3",
+        description: "how long should we wait for a ç in seconds. Default 3",
         requiredOnCreate: false,
         requiredOnEdit: false
       }),
@@ -116,76 +92,84 @@
   };
 
   exports.streamEvents = function(name, singleInput, eventWriter, done) {
-    var checkpointDir = this._inputDefinition.metadata["checkpoint_dir"];
+    console.log("Starting SQS poller");
+    Logger.info("Starting SQS poller");
     var queue = singleInput.queue;
-    var MaxNumberOfMessages = singleInput.MaxNumberOfMessages || 5;
-    var VisibilityTimeout = singleInput.VisibilityTimeout || 60;
-    var WaitTimeSeconds = singleInput.WaitTimeSeconds || 3;
+    var MaxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
+    var VisibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
+    var WaitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
+    var queueUrl = singleInput.queueUrl ;
     var sqsRecieverParams = {
-      QueueUrl: singleInput.queueUrl,
+      QueueUrl: queueUrl,
       MaxNumberOfMessages: MaxNumberOfMessages,
       VisibilityTimeout: VisibilityTimeout,
       WaitTimeSeconds: WaitTimeSeconds
     };
     var sqsPropertyParms = {
-      QueueUrl: 'https://sqs.us-west-2.amazonaws.com/865776687899/mPulseSQS',
+      QueueUrl: queueUrl,
       AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
     };
-    var queueLength;
 
     aws.config.accessKeyid = singleInput.accessKeyId;
-    aws.config.secretAccessKey = singleInput.secretAccessKey;
+    aws.config.secretAccessKey = singleInput.secretAccessKey ;
     aws.config.region = singleInput.region;
     var sqs = new aws.SQS();
 
-    var removeFromQueue = function(message) {
-      sqs.deleteMessage({
-        QueueUrl: sqsQueueUrl,
-        ReceiptHandle: message.ReceiptHandle
-      }, function(err, data) {
-        // If we errored, tell us that we did
-        err && console.log(err);
-        Logger.error(err);
-      });
-    };
-
-    function writeStream (elem, index, array) {
-      var body = JSON.parse(elem.body)
-      var event = new Event({
-        stanza: queue,
-        sourcetype: 'sqs',
-        data: elem.Body,
-        time: body.timestamp,
-      })
-      try {
-        eventWriter.writeEvent(event);
-        removeFromQueue(elem);
-      }
-
-    }
-
-    sqs.getQueueAttributes(params, function(err, data) {
-      if (err){
+    sqs.receiveMessage(sqsRecieverParams, function(err, data) {
+      if (err) {
         console.log(err);
-        Logger.error(err);
-        done();
-        return;
+        Logger.info(err);
       }
-      queueLength = data.Attributes.ApproximateNumberOfMessages;
-      while (queueLength != 0) {
-        sqs.receiveMessage(sqsRecieverParams, function(err, data) {
-          // If there are any messages to get
-          if (data.Messages) {
-            var MessageCount = data.Messages.length;
-            data.Messages.forEach(sendmessage);
-            Logger.info(MessageCount + 'Retrieved and forwarded');
-            }
-          sqs.getQueueAttributes(params, function(err, data) {
-            queueLength = data.Attributes.ApproximateNumberOfMessages;
+      // If there are any messages to get
+      if (data.Messages) {
+        var messageCount = data.Messages.length;
+        console.log(messageCount);
+        Logger.info(messageCount);
+        for (var i=0; i < messageCount; i++) {
+          var message = data.Messages[i];
+          var body = JSON.parse(message.Body);
+          var event = new Event({
+            stanza: name,
+            sourcetype: 'sqs',
+            data: JSON.stringify(message.Body),
+            time: body.timestamp
           });
+          try {
+            eventWriter.writeEvent(event);
+          }
+          catch (e) {
+            console.log(name, e.message);
+            Logger.error(name, e.message);
+          }
+
+          sqs.deleteMessage({
+            QueueUrl: queueUrl,
+            ReceiptHandle: message.ReceiptHandle
+          }, function(err, data) {
+            if (err) {
+              console.log('removeFromQueue',err);
+              Logger.error('removeFromQueue',err);
+            } // an error occurred
+            else{
+              console.log('removeFromQueue',data);
+              Logger.info('removeFromQueue',data);
+            }
+          });
+        }
+        Logger.info(messageCount + 'Retrieved and forwarded');
+      } else {
+        var x =JSON.stringify(data)
+        console.log(x);
+        Logger.info(x);
+        // trying to make any event
+        var event = new Event({
+          stanza: name,
+          sourcetype: 'sqs',
+          data: x
         });
+        eventWriter.writeEvent(event);
       }
     });
-
   }
+  ModularInputs.execute(exports, module);
 })();
