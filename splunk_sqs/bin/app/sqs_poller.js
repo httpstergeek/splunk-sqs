@@ -12,7 +12,7 @@
 // WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 // License for the specific language governing permissions and limitations
 // under the License.
-(function() {
+(function () {
   var splunkjs = require("splunk-sdk");
   var aws = require('aws-sdk');
   var ModularInputs = splunkjs.ModularInputs;
@@ -20,28 +20,22 @@
   var Event = ModularInputs.Event;
   var Scheme = ModularInputs.Scheme;
   var Argument = ModularInputs.Argument;
+  var utils = ModularInputs.utils;
+  var events = require('events');
 
+  exports.getScheme = function () {
+    var scheme = new Scheme("SQS Poller");
 
-  exports.getScheme = function() {
-    var scheme = new Scheme("sqs poller");
-
-    scheme.description = "Pulls events for an AWS SQS queue";
-    scheme.useExternalValidation = false;
-    scheme.useSingleInstance = false; // Set to false so an input can have an optional interval parameter.
+    scheme.description = "Streams events containing a random number.";
+    scheme.useExternalValidation = true;
+    scheme.useSingleInstance = true;
 
     scheme.args = [
-      new Argument({
-        name: "queue",
-        dataType: Argument.dataTypeString,
-        description: "SQS queue name",
-        requiredOnCreate: true,
-        requiredOnEdit: false
-      }),
       new Argument({
         name: "queueUrl",
         dataType: Argument.dataTypeString,
         description: "Queue Url as seen in AWS sqs console",
-        requiredOnCreate: true,
+        requiredOnCreate: false,
         requiredOnEdit: false
       }),
       new Argument({
@@ -75,14 +69,12 @@
       new Argument({
         name: "accessKeyId",
         dataType: Argument.dataTypeString,
-        description: "AWS accessKeyId",
         requiredOnCreate: true,
         requiredOnEdit: false
       }),
       new Argument({
         name: "secretAccessKey",
         dataType: Argument.dataTypeString,
-        description: "AWS secretAccessKey",
         requiredOnCreate: true,
         requiredOnEdit: false
       })
@@ -91,85 +83,77 @@
     return scheme;
   };
 
-  exports.streamEvents = function(name, singleInput, eventWriter, done) {
-    console.log("Starting SQS poller");
-    Logger.info("Starting SQS poller");
-    var queue = singleInput.queue;
+  exports.streamEvents = function (name, singleInput, eventWriter, done) {
+    Logger.info(name, "Starting SQS poller");
+
+    var eventEmitter = new events.EventEmitter();
     var MaxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
     var VisibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
     var WaitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
-    var queueUrl = singleInput.queueUrl ;
+    var queueUrl = singleInput.queueUrl;
     var sqsRecieverParams = {
       QueueUrl: queueUrl,
       MaxNumberOfMessages: MaxNumberOfMessages,
       VisibilityTimeout: VisibilityTimeout,
       WaitTimeSeconds: WaitTimeSeconds
     };
-    var sqsPropertyParms = {
-      QueueUrl: queueUrl,
-      AttributeNames: ['ApproximateNumberOfMessages', 'ApproximateNumberOfMessagesNotVisible']
-    };
-
+    var batchDelete = {Entries: [], QueueUrl: queueUrl}
     aws.config.accessKeyid = singleInput.accessKeyId;
-    aws.config.secretAccessKey = singleInput.secretAccessKey ;
+    aws.config.secretAccessKey = singleInput.secretAccessKey;
     aws.config.region = singleInput.region;
     var sqs = new aws.SQS();
 
     sqs.receiveMessage(sqsRecieverParams, function(err, data) {
-      if (err) {
-        console.log(err);
-        Logger.info(err);
+      if(err) {
+        Logger.error(name, err);
+        eventEmitter.emit('done');
+        return
       }
-      // If there are any messages to get
+
       if (data.Messages) {
-        var messageCount = data.Messages.length;
-        console.log(messageCount);
-        Logger.info(messageCount);
-        for (var i=0; i < messageCount; i++) {
+
+        for (var i = 0; i < data.Messages.length; i++) {
           var message = data.Messages[i];
-          var body = JSON.parse(message.Body);
-          var event = new Event({
-            stanza: name,
-            sourcetype: 'sqs',
-            data: JSON.stringify(message.Body),
-            time: body.timestamp
-          });
+
           try {
-            eventWriter.writeEvent(event);
+            var curEvent = new Event({
+              stanza: name,
+              data: message.Body,
+              time: JSON.parse(message.Body).timestamp
+            });
+            eventWriter.writeEvent(curEvent);
+            batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
           }
           catch (e) {
-            console.log(name, e.message);
-            Logger.error(name, e.message);
+            Logger.error(name, message.MessageId + ' ' + e.message);
           }
-
-          sqs.deleteMessage({
-            QueueUrl: queueUrl,
-            ReceiptHandle: message.ReceiptHandle
-          }, function(err, data) {
-            if (err) {
-              console.log('removeFromQueue',err);
-              Logger.error('removeFromQueue',err);
-            } // an error occurred
-            else{
-              console.log('removeFromQueue',data);
-              Logger.info('removeFromQueue',data);
-            }
-          });
         }
-        Logger.info(messageCount + 'Retrieved and forwarded');
+
+        if (batchDelete.Entries) {
+          sqs.deleteMessageBatch(batchDelete, function (err, data) {
+            if (err) {
+              Logger.error(name, 'sqs.deleteMessage ' + err);
+            } // an error occurred
+            else {
+              Logger.info(name, 'Removing messages from queue');
+            }
+            eventEmitter.emit('done');
+          });
+        } else {
+          eventEmitter.emit('done');
+        }
       } else {
-        var x =JSON.stringify(data)
-        console.log(x);
-        Logger.info(x);
-        // trying to make any event
-        var event = new Event({
-          stanza: name,
-          sourcetype: 'sqs',
-          data: x
-        });
-        eventWriter.writeEvent(event);
+        Logger.info(name, 'No messages in the queue');
+        eventEmitter.emit('done');
       }
     });
-  }
+
+    eventEmitter.on('done', function() {
+      Logger.info(name, 'Exiting')
+      done();
+      return;
+    });
+  };
+
   ModularInputs.execute(exports, module);
 })();

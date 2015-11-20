@@ -1,7 +1,6 @@
 [sqs_poller://<name>]
-*Generates events of json events from a queue.
+*Retrieves SQS Events for aws.
 
-queue = <value>
 queueUrl = <value>
 accessKeyId = <value>
 secretAccessKey = <value>
