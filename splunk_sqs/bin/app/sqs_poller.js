@@ -85,7 +85,6 @@
 
   exports.streamEvents = function (name, singleInput, eventWriter, done) {
     Logger.info(name, "Starting SQS poller");
-
     var eventEmitter = new events.EventEmitter();
     var MaxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
     var VisibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
@@ -106,12 +105,12 @@
     sqs.receiveMessage(sqsRecieverParams, function(err, data) {
       if(err) {
         Logger.error(name, err);
-        eventEmitter.emit('done');
-        return
+        //eventEmitter.emit('done');
+        //return;
       }
 
       if (data.Messages) {
-
+        Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS')
         for (var i = 0; i < data.Messages.length; i++) {
           var message = data.Messages[i];
 
@@ -137,21 +136,20 @@
             else {
               Logger.info(name, 'Removing messages from queue');
             }
-            eventEmitter.emit('done');
+            //eventEmitter.emit('done');
           });
         } else {
-          eventEmitter.emit('done');
+          //eventEmitter.emit('done');
         }
       } else {
         Logger.info(name, 'No messages in the queue');
-        eventEmitter.emit('done');
+        //eventEmitter.emit('done');
       }
     });
 
     eventEmitter.on('done', function() {
       Logger.info(name, 'Exiting')
       done();
-      return;
     });
   };
 
