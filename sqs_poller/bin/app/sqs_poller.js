@@ -117,6 +117,8 @@
           try {
             var curEvent = new Event({
               stanza: name,
+              source: 'aws:sqs',
+              sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
               data: message.Body,
               time: JSON.parse(message.Body).timestamp
             });
