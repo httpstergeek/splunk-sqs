@@ -28,7 +28,7 @@
 
     scheme.description = "Streams events containing a random number.";
     scheme.useExternalValidation = true;
-    scheme.useSingleInstance = true;
+    scheme.useSingleInstance = false;
 
     scheme.args = [
       new Argument({
@@ -105,7 +105,7 @@
     sqs.receiveMessage(sqsRecieverParams, function(err, data) {
       if(err) {
         Logger.error(name, err);
-        //eventEmitter.emit('done');
+        eventEmitter.emit('done');
         //return;
       }
 
@@ -132,18 +132,18 @@
           sqs.deleteMessageBatch(batchDelete, function (err, data) {
             if (err) {
               Logger.error(name, 'sqs.deleteMessage ' + err);
-            } // an error occurred
+            }
             else {
               Logger.info(name, 'Removing messages from queue');
             }
-            //eventEmitter.emit('done');
+            eventEmitter.emit('done');
           });
         } else {
-          //eventEmitter.emit('done');
+          eventEmitter.emit('done');
         }
       } else {
         Logger.info(name, 'No messages in the queue');
-        //eventEmitter.emit('done');
+        eventEmitter.emit('done');
       }
     });
 
