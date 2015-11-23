@@ -96,10 +96,14 @@
       VisibilityTimeout: VisibilityTimeout,
       WaitTimeSeconds: WaitTimeSeconds
     };
-    var batchDelete = {Entries: [], QueueUrl: queueUrl}
-    aws.config.accessKeyid = singleInput.accessKeyId;
-    aws.config.secretAccessKey = singleInput.secretAccessKey;
-    aws.config.region = singleInput.region;
+    var batchDelete = {Entries: [], QueueUrl: queueUrl};
+    var awsCreds = {
+      accessKeyId: singleInput.accessKeyId,
+      secretAccessKey: singleInput.secretAccessKey,
+    };
+    var awsRegion = {region: singleInput.region}
+    aws.config.update(awsCreds);
+    aws.config.update(awsRegion)
     var sqs = new aws.SQS();
 
     sqs.receiveMessage(sqsRecieverParams, function(err, data) {
