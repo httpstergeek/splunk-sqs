@@ -120,3 +120,7 @@ Temporary Items
 .apdisk
 *local/
 test.js
+*.gz
+*.tar
+*.zip
+*.spl
