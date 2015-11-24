@@ -22,7 +22,6 @@
   var Argument = ModularInputs.Argument;
   var utils = ModularInputs.utils;
   var events = require('events');
-
   exports.getScheme = function () {
     var scheme = new Scheme("SQS Poller");
 
@@ -77,6 +76,13 @@
         dataType: Argument.dataTypeString,
         requiredOnCreate: true,
         requiredOnEdit: false
+      }),
+      new Argument({
+        name: "handler",
+        description: "Custom event handler",
+        dataType: Argument.dataTypeString,
+        requiredOnCreate: false,
+        requiredOnEdit: false
       })
     ];
 
@@ -86,6 +92,7 @@
   exports.streamEvents = function (name, singleInput, eventWriter, done) {
     Logger.info(name, "Starting SQS poller");
     var eventEmitter = new events.EventEmitter();
+    var customHandler = require(singleInputhandler) || '';
     var MaxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
     var VisibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
     var WaitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
@@ -117,14 +124,18 @@
         Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS')
         for (var i = 0; i < data.Messages.length; i++) {
           var message = data.Messages[i];
+          var body = message.Body;
+
+          // run custom handler
+          if (customHandler) {
+            body = customHandler.hanlder(body);
+          }
 
           try {
             var curEvent = new Event({
-              stanza: name,
               source: 'aws:sqs',
               sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
-              data: message.Body,
-              time: JSON.parse(message.Body).timestamp
+              data: body
             });
             eventWriter.writeEvent(curEvent);
             batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
