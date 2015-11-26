@@ -20,8 +20,9 @@
   var Event = ModularInputs.Event;
   var Scheme = ModularInputs.Scheme;
   var Argument = ModularInputs.Argument;
-  var utils = ModularInputs.utils;
+  var Async = splunkjs.Async;
   var events = require('events');
+
   exports.getScheme = function () {
     var scheme = new Scheme("SQS Poller");
 
@@ -59,9 +60,16 @@
         requiredOnEdit: false
       }),
       new Argument({
+        name: "ParallelRequests",
+        dataType: Argument.dataTypeNumber,
+        description: "Number of Asynchronous Parallel requests.  Recommended maximum 5",
+        requiredOnCreate: false,
+        requiredOnEdit: false
+      }),
+      new Argument({
         name: "WaitTimeSeconds",
         dataType: Argument.dataTypeNumber,
-        description: "how long should we wait for a ç in seconds. Default 3",
+        description: "how long should we wait for request in seconds. Default 3",
         requiredOnCreate: false,
         requiredOnEdit: false
       }),
@@ -93,82 +101,119 @@
     Logger.info(name, "Starting SQS poller");
     var eventEmitter = new events.EventEmitter();
     var customHandler = require(singleInputhandler) || '';
-    var MaxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
-    var VisibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
-    var WaitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
+    var maxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
+    var visibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
+    var waitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
     var queueUrl = singleInput.queueUrl;
+    var parallelRequests = Number(singleInput.ParallelRequests) || 1;
     var sqsRecieverParams = {
       QueueUrl: queueUrl,
-      MaxNumberOfMessages: MaxNumberOfMessages,
-      VisibilityTimeout: VisibilityTimeout,
-      WaitTimeSeconds: WaitTimeSeconds
+      MaxNumberOfMessages: maxNumberOfMessages,
+      VisibilityTimeout: visibilityTimeout,
+      WaitTimeSeconds: waitTimeSeconds
     };
+    var sqsAttributes = {QueueUrl: queueUrl, AttributeNames: ['ApproximateNumberOfMessages']};
     var batchDelete = {Entries: [], QueueUrl: queueUrl};
     var awsCreds = {
       accessKeyId: singleInput.accessKeyId,
       secretAccessKey: singleInput.secretAccessKey,
     };
+    var working = true;
     var awsRegion = {region: singleInput.region}
     aws.config.update(awsCreds);
-    aws.config.update(awsRegion)
+    aws.config.update(awsRegion);
     var sqs = new aws.SQS();
 
-    sqs.receiveMessage(sqsRecieverParams, function(err, data) {
-      if(err) {
-        Logger.error(name, err);
-        eventEmitter.emit('done');
-        //return;
-      }
+    // Async loop while no errors
+    Async.whilst(
+      function () {
+        return working;
+      },
+      function (done) {
 
-      if (data.Messages) {
-        Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS')
-        for (var i = 0; i < data.Messages.length; i++) {
-          var message = data.Messages[i];
-          var body = message.Body;
-
-          // run custom handler
-          if (customHandler) {
-            body = customHandler.hanlder(body);
+        // find queue message level
+        sqs.getQueueAttributes(sqsAttributes, function (err, data) {
+          var parellelJobs = [];
+          parellelJobs[parallelRequests-1] = parallelRequests;
+          if (err) {
+            Logger.error(name,err);
+            done();
           }
 
-          try {
-            var curEvent = new Event({
-              source: 'aws:sqs',
-              sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
-              data: body
+          // If queue level 0 sleep 1 second
+          if (!Number(data.Attributes.ApproximateNumberOfMessages)) {
+            Async.sleep(1000, function() {
+              Logger.info(name, 'No message in queue');
             });
-            eventWriter.writeEvent(curEvent);
-            batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
+            done();
+            return;
           }
-          catch (e) {
-            Logger.error(name, message.MessageId + ' ' + e.message);
-          }
-        }
 
-        if (batchDelete.Entries) {
-          sqs.deleteMessageBatch(batchDelete, function (err, data) {
-            if (err) {
-              Logger.error(name, 'sqs.deleteMessage ' + err);
-            }
-            else {
-              Logger.info(name, 'Removing messages from queue');
-            }
-            eventEmitter.emit('done');
-          });
-        } else {
-          eventEmitter.emit('done');
-        }
-      } else {
-        Logger.info(name, 'No messages in the queue');
-        eventEmitter.emit('done');
+          // Starts parallel requests equal to parallelRequests value
+          Async.parallelEach(
+            parellelJobs,
+          function () {
+            // Retrieves message for sqs queue
+            sqs.receiveMessage(sqsRecieverParams, function(err, data) {
+              if(err) {
+                Logger.error(name, err);
+                done();
+              }
+
+              // Verifies there are messages
+              if(data.Messages) {
+                Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS');
+                for (var i = 0; i < data.Messages.length; i++) {
+                  var message = data.Messages[i];
+                  var body = message.Body;
+
+                  // run custom handler. optional
+                  if (customHandler) {
+                    body = customHandler.hanlder(body);
+                  }
+
+                  // Attempt to write event to Splunk
+                  try {
+                    var curEvent = new Event({
+                      source: 'aws:sqs',
+                      sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
+                      data: body
+                    });
+                    eventWriter.writeEvent(curEvent);
+                    batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
+                  }
+                  catch (e) {
+                    Logger.error(name, message.MessageId + ' ' + e.message);
+                  }
+                }
+
+                // Delete received messages from queue
+                if (batchDelete.Entries) {
+                  sqs.deleteMessageBatch(batchDelete, function (err, data) {
+                    if (err) {
+                      Logger.error(name, 'sqs.deleteMessage ' + err);
+                    }
+                    else {
+                      Logger.info(name, 'Removing messages from queue');
+                    }
+                  });
+                }
+              }
+              done();
+            });
+          },
+          function (err) {
+            Logger.error(name, err);
+            done();
+          })
+        });
+      },
+      function (err) {
+        Logger.error(name, err);
+        done();
       }
-    });
-
-    eventEmitter.on('done', function() {
-      Logger.info(name, 'Exiting')
-      done();
-    });
-  };
+    );
+  }
 
   ModularInputs.execute(exports, module);
 })();
