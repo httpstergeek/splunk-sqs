@@ -91,6 +91,13 @@
         dataType: Argument.dataTypeString,
         requiredOnCreate: false,
         requiredOnEdit: false
+      }),
+      new Argument({
+        name: "Logging",
+        description: "adds more logging.  default false",
+        dataType: Argument.dataTypeString,
+        requiredOnCreate: false,
+        requiredOnEdit: false
       })
     ];
 
@@ -100,12 +107,13 @@
   exports.streamEvents = function (name, singleInput, eventWriter, done) {
     Logger.info(name, "Starting SQS poller");
     var eventEmitter = new events.EventEmitter();
-    var customHandler = require(singleInputhandler) || '';
+    var customHandler = singleInput.handler || '';
     var maxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
     var visibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
     var waitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
     var queueUrl = singleInput.queueUrl;
     var parallelRequests = Number(singleInput.ParallelRequests) || 1;
+    var logMore = Boolean(singleInput.Logging) || false;
     var sqsRecieverParams = {
       QueueUrl: queueUrl,
       MaxNumberOfMessages: maxNumberOfMessages,
@@ -113,7 +121,6 @@
       WaitTimeSeconds: waitTimeSeconds
     };
     var sqsAttributes = {QueueUrl: queueUrl, AttributeNames: ['ApproximateNumberOfMessages']};
-    var batchDelete = {Entries: [], QueueUrl: queueUrl};
     var awsCreds = {
       accessKeyId: singleInput.accessKeyId,
       secretAccessKey: singleInput.secretAccessKey,
@@ -143,26 +150,24 @@
           // If queue level 0 sleep 1 second
           if (!Number(data.Attributes.ApproximateNumberOfMessages)) {
             Async.sleep(1000, function() {
-              Logger.info(name, 'No message in queue');
+              if (logMore) {
+                Logger.info(name, 'No message in queue');
+              }
             });
-            done();
-            return;
           }
 
-          // Starts parallel requests equal to parallelRequests value
-          Async.parallelEach(
-            parellelJobs,
-          function () {
-            // Retrieves message for sqs queue
+          // Retrieves message for sqs queue
             sqs.receiveMessage(sqsRecieverParams, function(err, data) {
               if(err) {
                 Logger.error(name, err);
                 done();
               }
-
+              var batchDelete = {Entries: [], QueueUrl: queueUrl};
               // Verifies there are messages
               if(data.Messages) {
-                Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS');
+                if (logMore) {
+                  Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS');
+                }
                 for (var i = 0; i < data.Messages.length; i++) {
                   var message = data.Messages[i];
                   var body = message.Body;
@@ -193,7 +198,7 @@
                     if (err) {
                       Logger.error(name, 'sqs.deleteMessage ' + err);
                     }
-                    else {
+                    if (logMore) {
                       Logger.info(name, 'Removing messages from queue');
                     }
                   });
@@ -201,11 +206,6 @@
               }
               done();
             });
-          },
-          function (err) {
-            Logger.error(name, err);
-            done();
-          })
         });
       },
       function (err) {
