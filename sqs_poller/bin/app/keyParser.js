@@ -22,24 +22,25 @@
 // Example: npm install underscore --save
 
 /*
-Example message
-message = {
-           'timestamp': 1448406234,
-           'env': 'prod'
-           'app': 'lambdaFunction',
-           'line': 'I am a very happy log'
-          }
-*/
-
-'use strict';
-var _ = require('underscore');
+ Example message
+ message = {
+ 'timestamp': 1448406234,
+ 'env': 'prod'
+ 'app': 'lambdaFunction',
+ 'line': 'I am a very happy log'
+ */
 
 
-var handler = function(message) {
-  message = JSON.parse(message);
-  message = _.keys(message);
-  return message
-};
+(function() {
+  "use strict";
+  var _ = require('underscore');
+  var root = exports || this;
 
-module.exports.hanlder = handler;
+  root.customHandler = function(message) {
+    message = JSON.parse(message);
+    message = _.keys(message);
+    return message
+  };
+
+})();
 

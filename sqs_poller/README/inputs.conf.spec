@@ -8,3 +8,6 @@ region = <value>
 MaxNumberOfMessages = <value>
 VisibilityTimeout = <value>
 WaitTimeSeconds = <value>
+sleepTime = <value>
+handler = <value>
+Logging = <value>
