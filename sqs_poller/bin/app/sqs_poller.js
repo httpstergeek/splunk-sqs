@@ -59,7 +59,7 @@
         requiredOnEdit: false
       }),
       new Argument({
-        name: "SleepTime",
+        name: "sleepTime",
         dataType: Argument.dataTypeNumber,
         description: "Number of seconds to sleep if queue is empty. Default is 1",
         requiredOnCreate: false,
@@ -137,8 +137,6 @@
       function (done) {
         // find queue message level
         sqs.getQueueAttributes(sqsAttributes, function (err, data) {
-          var parellelJobs = [];
-          parellelJobs[parallelRequests-1] = parallelRequests;
           if (err) {
             Logger.error(name,err);
             done();
