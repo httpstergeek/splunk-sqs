@@ -21,7 +21,6 @@
   var Scheme = ModularInputs.Scheme;
   var Argument = ModularInputs.Argument;
   var Async = splunkjs.Async;
-  var events = require('events');
 
   exports.getScheme = function () {
     var scheme = new Scheme("SQS Poller");
@@ -60,9 +59,9 @@
         requiredOnEdit: false
       }),
       new Argument({
-        name: "ParallelRequests",
+        name: "SleepTime",
         dataType: Argument.dataTypeNumber,
-        description: "Number of Asynchronous Parallel requests.  Recommended maximum 5",
+        description: "Number of seconds to sleep if queue is empty. Default is 1",
         requiredOnCreate: false,
         requiredOnEdit: false
       }),
@@ -106,13 +105,12 @@
 
   exports.streamEvents = function (name, singleInput, eventWriter, done) {
     Logger.info(name, "Starting SQS poller");
-    var eventEmitter = new events.EventEmitter();
     var customHandler = singleInput.handler || '';
     var maxNumberOfMessages = Number(singleInput.MaxNumberOfMessages) || 6;
     var visibilityTimeout = Number(singleInput.VisibilityTimeout) || 60;
     var waitTimeSeconds = Number(singleInput.WaitTimeSeconds) || 3;
     var queueUrl = singleInput.queueUrl;
-    var parallelRequests = Number(singleInput.ParallelRequests) || 1;
+    var sleepTime = Number(singleInput.sleepTime) * 1000 || 1000;
     var logMore = Boolean(singleInput.Logging) || false;
     var sqsRecieverParams = {
       QueueUrl: queueUrl,
@@ -137,7 +135,6 @@
         return working;
       },
       function (done) {
-
         // find queue message level
         sqs.getQueueAttributes(sqsAttributes, function (err, data) {
           var parellelJobs = [];
@@ -147,9 +144,9 @@
             done();
           }
 
-          // If queue level 0 sleep 1 second
+          // If queue level 0 sleep
           if (!Number(data.Attributes.ApproximateNumberOfMessages)) {
-            Async.sleep(1000, function() {
+            Async.sleep(sleepTime, function() {
               if (logMore) {
                 Logger.info(name, 'No message in queue');
               }

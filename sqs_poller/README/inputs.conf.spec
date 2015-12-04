@@ -8,6 +8,6 @@ region = <value>
 MaxNumberOfMessages = <value>
 VisibilityTimeout = <value>
 WaitTimeSeconds = <value>
-ParallelRequests = <value>
+sleepTime = <value>
 handler = <value>
 Logging = <value>
