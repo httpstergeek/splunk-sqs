@@ -141,47 +141,53 @@
             done();
           }
           var batchDelete = {Entries: [], QueueUrl: queueUrl};
-          // Verifies there are messages
-          if(data.hasOwnProperty('Messages')) {
-            if (logMore) {
-              Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS');
-            }
-            for (var i = 0; i < data.Messages.length; i++) {
-              var message = data.Messages[i];
-              var body = message.Body;
+          try {
 
-              // run custom handler. optional
-              if (customHandler) {
-                body = customHandler.hanlder(body);
+            // Verifies there are messages
+            if(data.hasOwnProperty('Messages')) {
+              if (logMore) {
+                Logger.info(name, 'recieved ' + data.Messages.length + ' from SQS');
+              }
+              for (var i = 0; i < data.Messages.length; i++) {
+                var message = data.Messages[i];
+                var body = message.Body;
+
+                // run custom handler. optional
+                if (customHandler) {
+                  body = customHandler.hanlder(body);
+                }
+
+                // Attempt to write event to Splunk
+                try {
+                  var curEvent = new Event({
+                    source: 'aws:sqs',
+                    sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
+                    data: body
+                  });
+                  eventWriter.writeEvent(curEvent);
+                  batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
+                }
+                catch (e) {
+                  Logger.error(name, message.MessageId + ' ' + e.message);
+                }
               }
 
-              // Attempt to write event to Splunk
-              try {
-                var curEvent = new Event({
-                  source: 'aws:sqs',
-                  sourcetype: queueUrl.replace(/^[^/]+\/\/([^/]+\/){2}/g , ''),
-                  data: body
+              // Delete received messages from queue
+              if (batchDelete.Entries) {
+                sqs.deleteMessageBatch(batchDelete, function (err, data) {
+                  if (err) {
+                    Logger.error(name, 'sqs.deleteMessage ' + err);
+                  }
+                  if (logMore) {
+                    Logger.info(name, 'Removing messages from queue');
+                  }
                 });
-                eventWriter.writeEvent(curEvent);
-                batchDelete.Entries.push({Id: message.MessageId, ReceiptHandle: message.ReceiptHandle})
-              }
-              catch (e) {
-                Logger.error(name, message.MessageId + ' ' + e.message);
               }
             }
-
-            // Delete received messages from queue
-            if (batchDelete.Entries) {
-              sqs.deleteMessageBatch(batchDelete, function (err, data) {
-                if (err) {
-                  Logger.error(name, 'sqs.deleteMessage ' + err);
-                }
-                if (logMore) {
-                  Logger.info(name, 'Removing messages from queue');
-                }
-              });
-            }
+          } catch(err) {
+              Logger.error(name,  err);
           }
+
           done();
         });
       },
